@@ -126,7 +126,7 @@ to apply them. The launcher enables the required gateway hint headers.
 For example, to use the main model and medium effort for auxiliary requests too:
 
 ```bash
-CLAUDE_CODEX_AUXILIARY_MODEL=gpt-6.1-sol CLAUDE_CODEX_AUXILIARY_REASONING=medium claude-codex
+CLAUDE_CODEX_AUXILIARY_MODEL=gpt-6.2-sol CLAUDE_CODEX_AUXILIARY_REASONING=medium claude-codex
 ```
 
 To route auxiliary requests through Ollama instead of ChatGPT, set a complete
@@ -278,14 +278,21 @@ for both stages, latency, protocol failures, and false approvals.
 
 Configuration:
 
+The main backend defaults to `gpt-6.2-sol` with `medium` reasoning. To use GPT-6.2 Astra:
+
 ```bash
-CLAUDE_CODEX_MODEL=gpt-6.1-sol claude-codex
+CLAUDE_CODEX_MODEL=gpt-6.2-astra claude-codex
 CLAUDE_CODEX_REASONING=xhigh claude-codex
 CLAUDE_CODEX_LOG_MAX_BYTES=10485760 claude-codex
 CLAUDE_CODEX_COMPACT_AT=180000 claude-codex
 # Optional experimental native endpoint; local compact is the safe default.
 CLAUDE_CODEX_REMOTE_COMPACT=1 claude-codex
 ```
+
+Both GPT-6.2 models can also be selected through `/model` when listed in your subscription catalog.
+Explicit `CLAUDE_CODEX_MODEL` settings continue to select the requested backend.
+GPT-6.2 requires reasoning; use `low` instead of `none` or `minimal`, as described in the
+[official OpenAI documentation](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6.2-astra).
 
 The launcher defaults to `ANTHROPIC_MODEL=claude-codex/<backend-model>` and pins the Default
 menu choice to that same backend via `ANTHROPIC_DEFAULT_MODEL`. This keeps the model name
