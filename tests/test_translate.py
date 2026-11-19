@@ -57,6 +57,7 @@ def test_lowers_anthropic_tool_loop(model) -> None:
     assert result["reasoning"] == {"effort": "medium", "summary": "auto"}
     assert "temperature" not in result
     assert "top_p" not in result
+    # The proxy still needs these instructions for routing and compaction before sending the request.
     assert result["instructions"] == "Be precise"
     assert result["input"][1] == {
         "type": "function_call",

@@ -1391,6 +1391,18 @@ def create_app(
                 "compaction_timeout", "Context compaction exceeded its total deadline"
             ) from exc
 
+        # GPT-6.2 appends top-level instructions after the cacheable input. Add the
+        # session prompt after compaction so it survives replacement of the history.
+        if (
+            codex_model in {"gpt-6.2-sol", "gpt-6.2-astra"}
+            and body.get("system")
+            and not classifier
+            and identity.request_class != "compaction"
+        ):
+            prompt = {"role": "developer", "content": upstream["instructions"]}
+            upstream["input"] = [prompt, *upstream["input"]]
+            upstream["instructions"] = ""
+
         async def response_events():
             local_http = (
                 httpx.AsyncClient(transport=httpx.ASGITransport(app=app), trust_env=False)

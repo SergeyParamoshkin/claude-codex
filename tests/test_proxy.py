@@ -147,6 +147,42 @@ async def test_proxy_streams_anthropic_events(monkeypatch) -> None:
     await upstream_client.aclose()
 
 
+@pytest.mark.parametrize("model", ["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol"])
+async def test_system_prompt_on_consecutive_turns(monkeypatch, model):
+    monkeypatch.setenv("CLAUDE_CODEX_MODEL", model)
+    calls = []
+
+    def upstream(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, text='data: {"type":"response.completed","response":{}}\n\n')
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as backend:
+        app = create_app(auth=FakeAuth(), client=backend)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://proxy"
+        ) as client:
+            messages = [{"role": "user", "content": "First question"}]
+            body = {
+                "system": [{"type": "text", "text": "Keep it short", "cache_control": {"type": "ephemeral"}}],
+                "messages": messages,
+            }
+            headers = {"x-claude-code-session-id": "two-turns"}
+            assert (await client.post("/v1/messages", json=body, headers=headers)).status_code == 200
+            messages.extend([{"role": "assistant", "content": "OK"}, {"role": "user", "content": "Next"}])
+            assert (await client.post("/v1/messages", json=body, headers=headers)).status_code == 200
+
+    first, second = calls
+    assert first["prompt_cache_key"] == second["prompt_cache_key"]
+    assert first["input"] == second["input"][:-2]
+    for call in calls:
+        if model == "gpt-6.1-sol":
+            assert call["instructions"] == "Keep it short"
+            assert call["input"][0]["role"] == "user"
+        else:
+            assert call["input"][0] == {"role": "developer", "content": "Keep it short"}
+            assert json.dumps(call).count("Keep it short") == 1
+
+
 @pytest.mark.parametrize("stream", [False, True], ids=["nonstream", "streaming"])
 async def test_proxy_native_web_search_returns_sources_and_citations(stream) -> None:
     captured: dict = {}
@@ -499,7 +535,10 @@ async def test_proxy_compacts_context_and_reuses_replacement_history(monkeypatch
             response = await client.post(
                 "/v1/messages",
                 headers={"anthropic-session-id": "compact-session"},
-                json={"model": "claude-opus", "max_tokens": 10, "stream": True, "messages": messages},
+                json={
+                    "model": "claude-opus", "max_tokens": 10, "system": "Keep it short",
+                    "stream": True, "messages": messages,
+                },
             )
             assert response.status_code == 200
 
@@ -511,7 +550,10 @@ async def test_proxy_compacts_context_and_reuses_replacement_history(monkeypatch
     ]
     assert compact_inputs[0]["model"] == "gpt-6.2-sol"
     assert compact_inputs[0]["prompt_cache_key"] == "compact-session"
-    assert normal_inputs[2] == usable_replacement_history + [
+    developer_prompt = {"role": "developer", "content": "Keep it short"}
+    assert normal_inputs[1] == [developer_prompt, *usable_replacement_history]
+    assert normal_inputs[2] == [
+        developer_prompt, *usable_replacement_history,
         {"role": "assistant", "content": [{"type": "output_text", "text": "answer two"}]},
         {"role": "user", "content": [{"type": "input_text", "text": "third"}]},
     ]
@@ -1364,7 +1406,10 @@ async def test_auxiliary_classifier_does_not_reuse_main_compaction_state(monkeyp
     assert len(captured) == 3
     assert captured[0][0]["thread-id"] != captured[1][0]["thread-id"]
     assert captured[0][1]["prompt_cache_key"] != captured[1][1]["prompt_cache_key"]
-    assert captured[0][1]["input"] == captured[1][1]["input"]
+    main_input, auxiliary_input = (entry[1]["input"] for entry in captured[:2])
+    assert main_input[0] == {"role": "developer", "content": "main"}
+    assert auxiliary_input[0] == {"role": "developer", "content": "auxiliary"}
+    assert main_input[1:] == auxiliary_input[1:]
     assert captured[1][1]["input"] == captured[2][1]["input"]
 
 @pytest.mark.parametrize("stream", [False, True])
@@ -1954,7 +1999,8 @@ async def test_local_checkpoint_budget_includes_added_prompt(monkeypatch, stream
             return httpx.Response(
                 400, json={"error": {"code": "context_length_exceeded", "message": "too big"}}
             )
-        text = body["input"][0]["content"][0]["text"]
+        first_user = next(item for item in body["input"] if item.get("role") == "user")
+        text = first_user["content"][0]["text"]
         if text.startswith("Transcript segment "):
             leaves.append(text)
         elif not text.startswith("Checkpoint summaries"):
