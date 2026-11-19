@@ -133,7 +133,7 @@ async def test_proxy_streams_anthropic_events(monkeypatch) -> None:
     assert captured["thread"]
     assert captured["installation"]
     assert captured["window"]
-    assert captured["body"]["model"] == "gpt-6.1-sol"
+    assert captured["body"]["model"] == "gpt-6.2-sol"
     assert captured["body"]["reasoning"] == {"effort": "medium", "summary": "auto"}
     assert captured["body"]["prompt_cache_key"] == "session-test"
     assert captured["body"]["client_metadata"] == {
@@ -509,7 +509,7 @@ async def test_proxy_compacts_context_and_reuses_replacement_history(monkeypatch
         {"role": "assistant", "content": [{"type": "output_text", "text": "answer one"}]},
         {"role": "user", "content": [{"type": "input_text", "text": "second"}]},
     ]
-    assert compact_inputs[0]["model"] == "gpt-6.1-sol"
+    assert compact_inputs[0]["model"] == "gpt-6.2-sol"
     assert compact_inputs[0]["prompt_cache_key"] == "compact-session"
     assert normal_inputs[2] == usable_replacement_history + [
         {"role": "assistant", "content": [{"type": "output_text", "text": "answer two"}]},
@@ -1250,8 +1250,16 @@ async def test_auxiliary_routing_keeps_main_and_other_request_classes_unchanged(
     assert captured[0]["reasoning"]["effort"] == expected_effort
 
 
-async def test_startup_probe_and_discovery_fallback_to_the_configured_backend(monkeypatch) -> None:
-    monkeypatch.setenv("CLAUDE_CODEX_MODEL", "gpt-test-backend")
+@pytest.mark.parametrize("configured, expected", [
+    (None, "gpt-6.2-sol"), ("gpt-test-backend", "gpt-test-backend"),
+])
+async def test_startup_probe_and_discovery_fallback_to_the_configured_backend(
+    monkeypatch, configured, expected
+) -> None:
+    if configured is None:
+        monkeypatch.delenv("CLAUDE_CODEX_MODEL", raising=False)
+    else:
+        monkeypatch.setenv("CLAUDE_CODEX_MODEL", configured)
     monkeypatch.setenv("ANTHROPIC_MODEL", "anthropic-codex-alias")
 
     def upstream(_: httpx.Request) -> httpx.Response:
@@ -1275,9 +1283,9 @@ async def test_startup_probe_and_discovery_fallback_to_the_configured_backend(mo
         {
             "type": "model",
             "id": "anthropic-codex-alias",
-            "display_name": "Codex: gpt-test-backend",
+            "display_name": f"Codex: {expected}",
             "description": (
-                "Routes to gpt-test-backend via the Codex subscription; "
+                f"Routes to {expected} via the Codex subscription; "
                 "Anthropic server safeguards are unavailable."
             ),
         }
